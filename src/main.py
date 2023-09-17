@@ -19,7 +19,7 @@ if not openai.api_key:
     print("Set the environment variable OPENAI_KEY to your api secret key")
     exit(1)
 
-def chat_loop():
+def main():
     tasks = []
     chat_db = ChatDB()
     current_chat_id = None
@@ -158,4 +158,3 @@ def chat_loop():
                 chat_db.set_chat_name(chat_id, name)
             tasks = [task for task in tasks if not task.done()]
 
-chat_loop()
