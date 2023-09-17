@@ -111,7 +111,6 @@ def read_input(chats, current_chat_name, can_regen, placeholder):
             # Prompt the user for their selection
             picker_session = PromptSession(key_bindings=kb)
             selection = picker_session.prompt(HTML("<b>Enter chat number, press 'return' for more, + to create a new chat, or '^D' to cancel: </b>"))
-            print(f"prompt returned {selection}")
             if user_pressed_esc[0]:
                 return
 
