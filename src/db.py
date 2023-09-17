@@ -1,14 +1,32 @@
 import sqlite3
+import fcntl
 import os
+import sys
+
+def fullpath(file):
+    xdg_root = os.getenv("XDG_ROOT")
+    if xdg_root:
+        return os.path.join(xdg_root, file)
+    else:
+        home_dir = os.path.expanduser("~")
+        return os.path.join(home_dir, file)
+
+lock_fd = None
+
+def check_single_instance(lock_file):
+    global lock_fd
+
+    try:
+      lock_fd = os.open(lock_file, os.O_CREAT | os.O_TRUNC | os.O_EXLOCK | os.O_NONBLOCK)
+    except BlockingIOError:
+        # Another instance is already running, so terminate
+        print("Another instance is already running. Exiting.")
+        sys.exit(1)
 
 class ChatDB:
     def __init__(self, db_file=".chatgpt.db"):
-        xdg_root = os.getenv("XDG_ROOT")
-        if xdg_root:
-            db_path = os.path.join(xdg_root, db_file)
-        else:
-            home_dir = os.path.expanduser("~")
-            db_path = os.path.join(home_dir, db_file)
+        db_path = fullpath(db_file)
+        check_single_instance(db_path + ".lock")
         self.conn = sqlite3.connect(db_path)
         self.create_schema()
 

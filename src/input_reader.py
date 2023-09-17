@@ -1,17 +1,17 @@
 from dataclasses import dataclass
-from prompt_toolkit.widgets import Frame
-from prompt_toolkit.layout.containers import Window
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
-from prompt_toolkit import PromptSession, print_formatted_text
-from formatting import formattedTime
+from prompt_toolkit.layout.containers import Window
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.layout.layout import Layout
-from ui_utils import draw_horizontal_line
+from prompt_toolkit.widgets import Frame
+from src.formatting import formattedTime
+from src.ui_utils import draw_horizontal_line
 from typing import Optional
 import html
-from prompt_toolkit.application.current import get_app
 
 @dataclass
 class UserInput:
@@ -111,7 +111,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder):
             # Prompt the user for their selection
             picker_session = PromptSession(key_bindings=kb)
             selection = picker_session.prompt(HTML("<b>Enter chat number, press 'return' for more, + to create a new chat, or '^D' to cancel: </b>"))
-
+            print(f"prompt returned {selection}")
             if user_pressed_esc[0]:
                 return
 

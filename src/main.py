@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-from chat import create_chat_with_spinner, suggest_name
-from formatting import setMark
-import openai
-from db import ChatDB
-from input_reader import Chat, read_input
+from src.background_task import BackgroundTask
+from src.chat import create_chat_with_spinner, suggest_name
+from src.db import ChatDB
+from src.formatting import print_message
+from src.formatting import setMark
+from src.input_reader import Chat, read_input
+from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import HTML
-from ui_utils import draw_horizontal_line, draw_light_horizontal_line
-from formatting import print_message
-from background_task import BackgroundTask
+from src.search import display_search_results
+from src.ui_utils import draw_horizontal_line, draw_light_horizontal_line
+import html
+import openai
 import os
 import sys
-import html
-from prompt_toolkit import print_formatted_text
-from search import display_search_results
 
 openai.api_key = os.environ.get("OPENAI_KEY")
 if not openai.api_key:
@@ -43,7 +43,11 @@ def chat_loop():
             current_chat_name = "New chat"
         else:
             current_chat_name = chat_db.get_chat_name(current_chat_id)
-        user_input = read_input(chats, current_chat_name, len(messages) > 1, placeholder)
+        try:
+            user_input = read_input(chats, current_chat_name, len(messages) > 1, placeholder)
+        except KeyboardInterrupt:
+            print("^C")
+            exit(0)
         placeholder = ""
         if not user_input:
             break

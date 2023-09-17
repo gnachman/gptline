@@ -1,7 +1,7 @@
 from prompt_toolkit import PromptSession, print_formatted_text
-from formatting import print_message
-import html
 from prompt_toolkit.formatted_text import HTML
+from src.formatting import print_message
+import html
 
 def display_search_results(query, messages_by_chat, chat_db):
     session = PromptSession()
