@@ -1,38 +1,100 @@
-import sys
-import time
+import simplejson
+import enum
+import inspect
 import openai
+import sys
 import threading
+import time
+import typing
+from src.spin import spin
 
-def create_chat_with_spinner(messages, temperature):
-    chats = []
+def get_json_type_name(value):
+    if isinstance(value, str):
+        return "string"
+    elif isinstance(value, int):
+        return "integer"
+    elif isinstance(value, float):
+        return "number"
+    elif isinstance(value, bool):
+        return "boolean"
+    else:
+        return "null"
 
-    def show_spinner():
-        spinner = ["|", "/", "-", "\\"]
-        i = 0
-        while len(chats) == 0:
-            sys.stdout.write("\r" + spinner[i % 4])
-            sys.stdout.flush()
-            time.sleep(0.1)
-            i += 1
+def _json_schema(func):
+    api_info = {}
 
+    # Get function name
+    api_info["name"] = func.__name__
 
+    # Get function description from docstring
+    docstring = inspect.getdoc(func)
+    if docstring:
+        api_info["description"] = docstring.split("\n\n")[0]
+
+    # Get function parameters
+    parameters = {}
+    parameters["type"] = "object"
+
+    properties = {}
+
+    signature = inspect.signature(func)
+    required = []
+    for param_name, param in signature.parameters.items():
+        param_info = {}
+
+        # Get parameter type from type hints
+        if typing.get_origin(param.annotation) is typing.Union and type(None) in typing.get_args(param.annotation):
+            # Handle Optional case
+            inner_type = typing.get_args(param.annotation)[0]
+            if issubclass(inner_type, enum.Enum):
+                param_info["type"] = get_json_type_name(inner_type.__members__[list(inner_type.__members__)[0]].value)
+                param_info["enum"] = [member.value for member in inner_type]
+            else:
+                param_info["type"] = get_json_type_name(inner_type.__name__)
+        elif issubclass(param.annotation, enum.Enum):
+            param_info["type"] = get_json_type_name(param.annotation.__members__[list(param.annotation.__members__)[0]].value)
+            param_info["enum"] = [member.value for member in param.annotation]
+        else:
+            param_info["type"] = get_json_type_name(param.annotation.__name__)
+
+        # Get parameter description from docstring
+        if docstring and param_name in docstring:
+            param_info["description"] = docstring.split(param_name + ":")[1].split("\n")[0].strip()
+
+        # Check if parameter is required
+        if param.default == inspect.Parameter.empty:
+            required.append(param_name)
+
+        # Add parameter info to parameters dict
+        properties[param_name] = param_info
+
+    # Add parameters to api_info
+    parameters["properties"] = properties
+    parameters["required"] = required
+    api_info["parameters"] = parameters
+
+    return api_info
+
+def create_chat_with_spinner(messages, temperature, functions):
+    return create_chat(messages, temperature, functions, True)
+
+def create_chat(messages, temperature, functions, spinner=False):
     def create_chat_model():
-        chat = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo", messages=messages, stream=True, temperature=temperature
-        )
-        chats.append(chat)
+        args = {
+            "model": "gpt-4",
+            "messages": messages,
+            "stream": True,
+            "temperature": temperature,
+        }
+        if functions:
+            args['functions'] = list(map(lambda f: _json_schema(f), functions))
+        return openai.ChatCompletion.create(**args)
 
-    thread = threading.Thread(target=create_chat_model)
-    thread.start()
-
-    spinner_thread = threading.Thread(target=show_spinner)
-    spinner_thread.start()
-
-    thread.join()
-    spinner_thread.join()
-
-    sys.stdout.write("\r \r")
-    return chats[0]
+    if not spinner:
+        chats = []
+        return create_chat_model()
+    else:
+        return spin(create_chat_model)
 
 
 def suggest_name(chat_id, message):
@@ -48,3 +110,16 @@ def suggest_name(chat_id, message):
     name = chat_completion_resp.choices[0].message.content
     return (chat_id, name)
 
+def invoke(functions, name, args_str):
+    try:
+        args = simplejson.loads(args_str, strict=False)
+    except Exception as e:
+        print("")
+        print(f"ChatGPT called {name} with bad input: {args_str}")
+        raise ValueError("The function arguments did not form a valid JSON document")
+
+    for func in functions:
+        if func.__name__ == name:
+            return func(**args)
+    else:
+        raise ValueError(f"Function '{name}' not found.")

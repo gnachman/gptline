@@ -21,6 +21,7 @@ class UserInput:
     query: Optional[str] = None
     regenerate = False
     edit = False
+    allow_execution = False
 
 @dataclass
 class Chat:
@@ -30,8 +31,9 @@ class Chat:
 
 
 # Returns UserInput
-def read_input(chats, current_chat_name, can_regen, placeholder):
+def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution):
     result = UserInput()
+    result.allow_execution = allow_execution
 
     session = PromptSession()
     kb = KeyBindings()
@@ -55,6 +57,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder):
     SEARCH = "$$$SEARCH"
     REGENERATE = "$$$REGENERATE"
     EDIT = "$$$EDIT"
+    TOGGLE_SETTING = "$$$TOGGLE_SETTING"
 
     @kb.add(Keys.F2)
     def _(event):
@@ -81,6 +84,15 @@ def read_input(chats, current_chat_name, can_regen, placeholder):
             app = get_app()
             app.exit(result=EDIT)
 
+    @kb.add(Keys.F7)
+    def _(event):
+        result.allow_execution = not result.allow_execution
+        if result.allow_execution:
+            print("Command execution enabled.")
+        else:
+            print("Command execution disabled.")
+        app = get_app()
+        app.exit(result=TOGGLE_SETTING)
     def read_search_query():
         search_session = PromptSession()
         return search_session.prompt(HTML("<b>Search: </b>"))
@@ -148,6 +160,10 @@ def read_input(chats, current_chat_name, can_regen, placeholder):
                 if can_regen:
                     text += "  <b>F5</b>: Regenerate"
                     text += "  <b>F6</b>: Edit Last"
+                if result.allow_execution:
+                    text += "  <b>F7</b>: Disable Execution"
+                else:
+                    text += "  <b>F7</b>: Enable Execution"
                 return HTML(text)
             value = session.prompt(
                     "",
@@ -166,6 +182,8 @@ def read_input(chats, current_chat_name, can_regen, placeholder):
             elif value == REGENERATE:
                 result.regenerate = True
                 return result
+            elif value == TOGGLE_SETTING:
+              continue
             elif value == EDIT:
                 result.edit = True
                 return result

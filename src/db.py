@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Optional
 import fcntl
 import os
 import sys
@@ -45,9 +46,11 @@ class ChatDB:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id INTEGER,
             role TEXT,
-            content TEXT,
+            content TEXT NULL,
             time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             deleted INTEGER DEFAULT 0,
+            function_call_name TEXT,
+            function_call_arguments TEXT,
             FOREIGN KEY (chat_id) REFERENCES chats (id)
         )
         """
@@ -70,16 +73,17 @@ class ChatDB:
         self.conn.commit()
         return chat_id
 
-    def add_message(self, chat_id: int, role: str, content: str):
+    def add_message(self, chat_id: int, role: str, content: str, function_call_name: Optional[str], function_call_arguments: Optional[str]):
         cursor = self.conn.cursor()  # Create a cursor
-        query = "INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)"
-        cursor.execute(query, (chat_id, role, content))
+        query = "INSERT INTO messages (chat_id, role, content, function_call_name, function_call_arguments) VALUES (?, ?, ?, ?, ?)"
+        cursor.execute(query, (chat_id, role, content, function_call_name, function_call_arguments))
         self.conn.commit()
         last_message_id = cursor.lastrowid
 
-        fts_query = "INSERT INTO messages_fts (message_id, content) VALUES (?, ?)"
-        self.conn.execute(fts_query, (last_message_id, content.lower()))
-        self.conn.commit()
+        if content is not None and role != "function":
+            fts_query = "INSERT INTO messages_fts (message_id, content) VALUES (?, ?)"
+            self.conn.execute(fts_query, (last_message_id, content.lower()))
+            self.conn.commit()
 
         query = f"UPDATE chats SET last_update = CURRENT_TIMESTAMP WHERE id = ?"
         cursor.execute(query, (chat_id, ))
@@ -100,7 +104,7 @@ class ChatDB:
             raise IndexError("Index out of range")
 
     def get_message_by_index(self, chat_id: int, index: int):
-        query = "SELECT role, content, time, id, deleted FROM messages WHERE chat_id = ? ORDER BY id LIMIT 1 OFFSET ?"
+        query = "SELECT role, content, time, id, deleted, function_call_name, function_call_arguments FROM messages WHERE chat_id = ? ORDER BY id LIMIT 1 OFFSET ?"
         result = self.conn.execute(query, (chat_id, index)).fetchone()
         if result:
             return result

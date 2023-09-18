@@ -1,7 +1,10 @@
 .PHONY: test upload
 
-test:
-	rm -rf testenv/ ; python3 -m venv testenv ; source testenv/bin/activate.csh ; pip install -e . ; testenv/bin/gptline
+run:
+	source testenv/bin/activate ; pip install -e . ; testenv/bin/gptline
+
+rebuild:
+	rm -rf testenv/ ; python3 -m venv testenv ; source testenv/bin/activate ; pip install -e . ; testenv/bin/gptline
 
 upload:
 	rm -f dist/*
