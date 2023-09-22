@@ -23,247 +23,366 @@ if not openai.api_key:
     print("Set the environment variable OPENAI_KEY to your api secret key")
     exit(1)
 
-def delete_until_user_message(chat_db, messages):
-     while messages[-1]["role"] == "assistant" or messages[-1]["role"] == "function" or "function_call" in messages[-1]:
-         chat_db.delete_message(messages[-1]["id"])
-         messages = messages[:-1]
-     return messages
+class App:
+    def __init__(self):
+        self.tasks = []
+        self.chat_db = ChatDB()
+        self.current_chat_id = None
+        self.messages = []
+        self.placeholder = ""
+        self.allow_execution = False
+        self.temperature = 0
+        self.chats = []
+        self.chat = None
+        self.content = None
 
-def main():
-    tasks = []
-    chat_db = ChatDB()
-    current_chat_id = None
-    messages = []
-
-    def new_chat():
-        current_chat_id = chat_db.create_chat("New chat")
-        messages.clear()
-        messages.append({
+    def new_chat(self):
+        self.current_chat_id = self.chat_db.create_chat("New chat")
+        self.messages.clear()
+        self.messages.append({
             "role": "system",
             "content": "You assist a user in a terminal emulator."})
-        chat_db.add_message(current_chat_id, messages[0]["role"], messages[0]["content"], None, None)
-        return current_chat_id
+        self.chat_db.add_message(self.current_chat_id, self.messages[0]["role"],
+                self.messages[0]["content"], None, None)
+        return self.current_chat_id
 
-    placeholder = ""
-    allow_execution = False
-    while True:
-        temperature = 0
-        chats = list(map(lambda x: Chat(*x), chat_db.list_chats()))
+    def run_forever(self):
+        while True:
+            self.iterate()
+
+    def delete_until_user_message(self):
+         while self.messages[-1]["role"] == "assistant" or self.messages[-1]["role"] == "function" or "function_call" in self.messages[-1]:
+             self.chat_db.delete_message(self.messages[-1]["id"])
+             self.messages = self.messages[:-1]
+
+    def iterate(self):
+        self.temperature = 0
+        self.chats = list(map(lambda x: Chat(*x), self.chat_db.list_chats()))
         setMark()
-        if current_chat_id is None:
-            current_chat_name = "New chat"
-        else:
-            current_chat_name = chat_db.get_chat_name(current_chat_id)
-        try:
-            user_input = read_input(chats, current_chat_name, len(messages) > 1, placeholder, allow_execution)
-            allow_execution = user_input.allow_execution
-        except KeyboardInterrupt:
-            print("^C")
-            exit(0)
-        placeholder = ""
+        current_chat_name = self.get_chat_name()
+        user_input = self.read(current_chat_name)
+        self.placeholder = ""
         if not user_input:
-            break
+            # Empty query means to quit.
+            return False
         if user_input.regenerate:
-            print("Regenerating response...")
-            messages = delete_until_user_message(chat_db, messages)
-            user_input.text = messages[-1]["content"]
-            temperature = 0.5
-            print(user_input.text)
-            chat_db.delete_message(messages[-1]["id"])
-            messages = messages[:-1]
+            # Delete the last response and preceding prompt, and act as though
+            # the user retyped it.
+            # prompt.
+            user_input.text = self.regenerate()
         elif user_input.edit:
-            print("Editing previous message...")
-            messages = delete_until_user_message(chat_db, messages)
-            placeholder = messages[-1]["content"]
-            chat_db.delete_message(messages[-1]["id"])
-            messages = messages[:-1]
-            continue
-
+            # Remove the last message, set placeholder, and ask for input again.
+            self.edit()
+            return True
         message = user_input.text
         if user_input.query:
-            i = None
-            cursor = None
-            PAGE_SIZE = 10
-            while True:
-                search_results, cursor = chat_db.search_messages(user_input.query, cursor, PAGE_SIZE)
-                if not len(search_results):
-                    print("No results")
-                    break
-                i = display_search_results(user_input.query, search_results, chat_db)
-                if i is None:
-                    cursor += PAGE_SIZE
-                    continue
-                if i < 0:
-                    break
-                user_input.chat_identifier = i
-                break
-            if i is None or i < 0:
-                continue
-
+            new_i = self.search(user_input.query)
+            if new_i is not None:
+                user_input.chat_identifier = new_i
+            else:
+                return True
         if user_input.chat_identifier:
             if user_input.chat_identifier < 0:
                 print_formatted_text(HTML(f'<b>Starting a new chat</b>'))
-                current_chat_id = new_chat()
+                self.current_chat_id = self.new_chat()
             else:
-                current_chat_id = user_input.chat_identifier
-                n = chat_db.num_messages(current_chat_id)
-                messages = []
-                for i in range(n):
-                    (role, content, time, message_id, deleted, fname, fargs) = chat_db.get_message_by_index(current_chat_id, i)
-                    if content is not None:
-                        m = {
-                            "id": message_id,
-                            "role": role,
-                            "content": content
-                            }
-                        if role == "function":
-                            m["name"] = fname
-                        else:
-                            if role == "user":
-                                draw_horizontal_line()
-                            else:
-                                draw_light_horizontal_line()
-                            print_message(time, role, html.escape(content.rstrip()), deleted)
-                            print("")
-                        messages.append(m)
-                    elif fname and fargs:
-                        messages.append({
-                            "role": "assistant",
-                            "content": None,
-                            "function_call": {
-                                "name": fname,
-                                "arguments": fargs}})
-
+                self.switch(user_input.chat_identifier)
             if not message:
-                continue
-        elif current_chat_id is None:
-            current_chat_id = new_chat()
+                return True
+        elif self.current_chat_id is None:
+            self.current_chat_id = self.new_chat()
         if not message:
-            return
-        if len(messages) == 1:
-            # The chat needs a name
-            tasks.append(BackgroundTask(lambda: suggest_name(current_chat_id, message)))
+            return False
+        if len(self.messages) == 1:
+            self.assign_name(message)
 
+        self.send_message(message)
+        return True
+
+    def send_message(self, message):
         draw_light_horizontal_line()
         setMark()
 
-        messages.append(
+        self.messages.append(
             {"role": "user", "content": message},
         )
-        message_id = chat_db.add_message(current_chat_id, "user", message, None, None)
-        messages[-1]["id"] = message_id
-        sanitized = [{k: v for k, v in message.items() if k != 'id'} for message in messages]
-        if allow_execution:
+        message_id = self.chat_db.add_message(self.current_chat_id, "user", message, None, None)
+        self.messages[-1]["id"] = message_id
+        sanitized = [
+                {k: v for k, v in message.items() if k != 'id'} 
+                for message in self.messages]
+        if self.allow_execution:
             functions = [execute_command, create_file, execute_python]
         else:
             functions = []
-        chat = create_chat_with_spinner(sanitized, temperature, functions)
-        content = ""
+        self.chat = create_chat_with_spinner(sanitized, self.temperature, functions)
+        self.content = ""
         fspinner = None
         try:
             # There can be more than one chat when there's a function call.
-            while True:
-                call_name = None
-                call_args = None
-                function_output = None
-                error_output = None
-                fspinner = None
-
-                # Iterate over streaming tokens in the chat.
-                for resp in chat:
-                    if resp.choices[0].finish_reason:
-                        finish_reason = resp.choices[0].finish_reason
-                        if finish_reason == "function_call" and call_name and call_args:
-                            try:
-                                if fspinner:
-                                    fspinner.stop()
-                                    fspinner = None
-                                function_output = invoke(functions, call_name, call_args)
-                            except Exception as e:
-                                error_output = str(e)
-                        elif finish_reason != "stop":
-                            print("")
-                            print(f"Stopping because {finish_reason}")
-                        break
-                    elif "content" in resp.choices[0].delta and resp.choices[0].delta.content:
-                        chunk = resp.choices[0].delta.content
-                        content += chunk
-                        sys.stdout.write(chunk)
-                        sys.stdout.flush()
-                    elif "function_call" in resp.choices[0].delta and resp.choices[0].delta.function_call and allow_execution:
-                        if "name" in resp.choices[0].delta.function_call:
-                            if call_name:
-                                call_name += resp.choices[0].delta.function_call.name
-                            else:
-                                fspinner = Spinner()
-                                call_name = resp.choices[0].delta.function_call.name
-                        if "arguments" in resp.choices[0].delta.function_call:
-                            if call_args:
-                                call_args += resp.choices[0].delta.function_call.arguments
-                            else:
-                                call_args = resp.choices[0].delta.function_call.arguments
-
-                if call_name and call_args:
-                    # Record that a function call was requested
-                    messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "function_call": {
-                            "name": call_name,
-                            "arguments": call_args}})
-                    message_id = chat_db.add_message(current_chat_id, messages[-1]["role"], messages[-1]["content"], call_name, call_args)
-                    messages[-1]["id"] = message_id
-                if function_output:
-                    # Record the output of the function call
-                    messages.append({
-                        "role": "function",
-                        "name": call_name,
-                        "content": function_output})
-                    message_id = chat_db.add_message(current_chat_id, messages[-1]["role"], messages[-1]["content"], call_name, None)
-                    messages[-1]["id"] = message_id
-                    sanitized = [{k: v for k, v in message.items() if k != 'id'} for message in messages]
-                    chat = create_chat(sanitized, temperature, functions)
-                    continue
-                if error_output:
-                    # Something went wrong
-                    print(f'Error: {error_output}')
-                    auto_retry = False
-                    messages.append({
-                        "role": "system",
-                        "content": error_output})
-                    message_id = chat_db.add_message(current_chat_id, messages[-1]["role"], messages[-1]["content"], None, None)
-                    messages[-1]["id"] = message_id
-                    if auto_retry:
-                        sanitized = [{k: v for k, v in message.items() if k != 'id'} for message in messages]
-                        print(sanitized)
-                        chat = create_chat(sanitized, temperature, functions)
-                        continue
-                    else:
-                        print(f"An error was encountered while executing a function: {error_output}")
-                        content = None
-
-                break
+            while self.read_response(functions):
+                pass
 
             print("")
             print("")
         except KeyboardInterrupt:
-            chat.close()
+            self.chat.close()
             print("")
-        if fspinner:
-            fspinner.stop()
-            fspinner = None
-        if content is not None:
-            messages.append({"role": "assistant", "content": content})
-        message_id = chat_db.add_message(current_chat_id, messages[-1]["role"], messages[-1]["content"], None, None)
-        messages[-1]["id"] = message_id
+        self.commit_ordinary()
 
         # Check if any tasks are done.
-        for task in tasks:
+        self.check_tasks()
+
+    def check_tasks(self):
+        for task in self.tasks:
             if task.done():
                 (chat_id, name) = task.result()
-                chat_db.set_chat_name(chat_id, name)
-            tasks = [task for task in tasks if not task.done()]
+                self.chat_db.set_chat_name(chat_id, name)
+            self.tasks = [task for task in self.tasks if not task.done()]
 
+    def get_chat_name(self):
+        if self.current_chat_id is None:
+            return "New chat"
+        else:
+            return self.chat_db.get_chat_name(self.current_chat_id)
+
+    def read(self, current_chat_name):
+        try:
+            user_input = read_input(
+                    self.chats,
+                    current_chat_name,
+                    len(self.messages) > 1,
+                    self.placeholder,
+                    self.allow_execution)
+            self.allow_execution = user_input.allow_execution
+            return user_input 
+        except KeyboardInterrupt:
+            print("^C")
+            exit(0)
+
+    def regenerate(self):
+        print("Regenerating response...")
+        self.delete_until_user_message()
+        text = self.messages[-1]["content"]
+        self.temperature = 0.5
+        self.chat_db.delete_message(self.messages[-1]["id"])
+        self.messages = self.messages[:-1]
+        return text
+
+    def edit(self):
+        print("Editing previous message...")
+        self.delete_until_user_message()
+        self.placeholder = self.messages[-1]["content"]
+        self.chat_db.delete_message(self.messages[-1]["id"])
+        self.messages = self.messages[:-1]
+
+    def search(self, query):
+        """Returns id of chat to switch to or else None.
+        A negative id means to create a new chat."""
+        i = None
+        cursor = None
+        PAGE_SIZE = 10
+        while True:
+            search_results, cursor = self.chat_db.search_messages(query, cursor, PAGE_SIZE)
+            if not len(search_results):
+                print("No results")
+                return None
+            i = display_search_results(query, search_results, self.chat_db)
+            if i is None:
+                cursor += PAGE_SIZE
+                continue
+            if i < 0:
+                return -1
+            return i
+
+    def switch(self, chat_id):
+        """Replace self.messages with contents of chat_id and also print the
+        messages to the screen. As a side-effect, set self.current_chat_id."""
+        self.current_chat_id = chat_id
+        n = self.chat_db.num_messages(self.current_chat_id)
+        self.messages = []
+        for i in range(n):
+            (role, self.content, time, message_id, deleted, fname, fargs) = self.chat_db.get_message_by_index(self.current_chat_id, i)
+            if self.content is not None:
+                m = {
+                    "id": message_id,
+                    "role": role,
+                    "content": self.content
+                    }
+                if role == "function":
+                    m["name"] = fname
+                else:
+                    if role == "user":
+                        draw_horizontal_line()
+                    else:
+                        draw_light_horizontal_line()
+                    print_message(time, role, html.escape(self.content.rstrip()), deleted)
+                    print("")
+                self.messages.append(m)
+            elif fname and fargs:
+                self.messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "function_call": {
+                        "name": fname,
+                        "arguments": fargs}})
+
+    def assign_name(self, message):
+        # The chat needs a name
+        self.tasks.append(BackgroundTask(lambda: suggest_name(self.current_chat_id, message)))
+
+    def handle_function_call(self, functions, fspinner, call_name, call_args):
+        try:
+            if fspinner:
+                fspinner.stop()
+            return (None, invoke(functions, call_name, call_args), None)
+        except Exception as e:
+            return (None, None, e.str)
+
+    def stop_unexpectedly(self, finish_reason):
+        print("")
+        print(f"Stopping because {finish_reason}")
+
+    def read_response(self, functions):
+        """Read an entire response and handle it. Return True to call this again."""
+        fspinner = None
+        try:
+            call_name = None
+            call_args = None
+            function_output = None
+            error_output = None
+            for resp in self.chat:
+                if resp.choices[0].finish_reason:
+                    finish_reason = resp.choices[0].finish_reason
+                    if finish_reason == "function_call" and call_name and call_args:
+                        fspinner, function_output, error_output = self.handle_function_call(
+                                functions,
+                                fspinner,
+                                call_name,
+                                call_args)
+                    elif finish_reason != "stop":
+                        self.stop_unexpectedly(finish_reason)
+                    break
+                elif "content" in resp.choices[0].delta and resp.choices[0].delta.content:
+                    self.content = self.handle_content(resp, self.content)
+                elif "function_call" in resp.choices[0].delta and resp.choices[0].delta.function_call and self.allow_execution:
+                    call_name, call_args, fspinner = self.accrue_function_call(
+                            resp, call_name, call_args, fspinner)
+
+
+            return self.commit_special(
+                    call_name,
+                    call_args,
+                    function_output,
+                    error_output,
+                    functions)
+        finally:
+            if fspinner:
+                fspinner.stop()
+                fspinner = None
+
+    def handle_content(self, resp, content):
+        chunk = resp.choices[0].delta.content
+        content += chunk
+        sys.stdout.write(chunk)
+        sys.stdout.flush()
+        return content
+
+    def accrue_function_call(self, resp, call_name, call_args, fspinner):
+        if "name" in resp.choices[0].delta.function_call:
+            if call_name:
+                call_name += resp.choices[0].delta.function_call.name
+            else:
+                fspinner = Spinner()
+                call_name = resp.choices[0].delta.function_call.name
+        if "arguments" in resp.choices[0].delta.function_call:
+            if call_args:
+                call_args += resp.choices[0].delta.function_call.arguments
+            else:
+                call_args = resp.choices[0].delta.function_call.arguments
+        return (call_name, call_args, fspinner)
+
+    def commit_special(self, call_name, call_args, function_output,
+            error_output, functions):
+        if call_name and call_args:
+            self.commit_function_call_request(call_name, call_args);
+        if function_output:
+            self.commit_function_output(functions, call_name, function_output)
+            return True
+        if error_output:
+            return self.commit_error(error_output, functions)
+        return False
+
+    def commit_ordinary(self):
+        if self.content is not None:
+            self.messages.append({"role": "assistant", "content": self.content})
+        message_id = self.chat_db.add_message(
+                self.current_chat_id,
+                self.messages[-1]["role"],
+                self.messages[-1]["content"],
+                None,
+                None)
+        self.messages[-1]["id"] = message_id
+
+    def commit_function_call_request(self, call_name, call_args):
+        # Record that a function call was requested
+        self.messages.append({
+            "role": "assistant",
+            "content": None,
+            "function_call": {
+                "name": call_name,
+                "arguments": call_args}})
+        message_id = self.chat_db.add_message(self.current_chat_id,
+                self.messages[-1]["role"], self.messages[-1]["content"], call_name, call_args)
+        self.messages[-1]["id"] = message_id
+
+    def commit_function_output(self, functions, call_name, function_output):
+        # Record the output of the function call
+        self.messages.append({
+            "role": "function",
+            "name": call_name,
+            "content": function_output})
+        message_id = self.chat_db.add_message(
+                self.current_chat_id,
+                self.messages[-1]["role"],
+                self.messages[-1]["content"],
+                call_name,
+                None)
+        self.messages[-1]["id"] = message_id
+        sanitized = [
+                {k: v for k, v in message.items() if k != 'id'} 
+                for message in self.messages]
+        self.chat = create_chat(sanitized, self.temperature, functions)
+
+    def commit_error(self, error_output, functions):
+        # Something went wrong
+        print(f'Error: {error_output}')
+        auto_retry = False
+        self.messages.append({
+            "role": "system",
+            "content": error_output})
+        self.message_id = self.chat_db.add_message(
+                self.current_chat_id,
+                self.messages[-1]["role"],
+                self.messages[-1]["content"],
+                None,
+                None)
+        self.messages[-1]["id"] = message_id
+        if auto_retry:
+            sanitized = [
+                    {k: v for k, v in message.items() if k != 'id'} 
+                    for message in self.messages]
+            print(sanitized)
+            self.chat = create_chat(sanitized, self.temperature, functions)
+            return True
+        else:
+            print(f"An error was encountered while executing a function: {error_output}")
+            self.content = None
+            return False
+
+def main():
+    app = App()
+    app.run_forever()
 
 def execute_command(command_line: str, input_string: str):
     """

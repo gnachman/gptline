@@ -14,21 +14,12 @@ def fullpath(file):
 
 lock_fd = None
 
-def check_single_instance(lock_file):
-    global lock_fd
-
-    try:
-      lock_fd = os.open(lock_file, os.O_CREAT | os.O_TRUNC | os.O_EXLOCK | os.O_NONBLOCK)
-    except BlockingIOError:
-        # Another instance is already running, so terminate
-        print("Another instance is already running. Exiting.")
-        sys.exit(1)
-
 class ChatDB:
     def __init__(self, db_file=".chatgpt.db"):
         db_path = fullpath(db_file)
-        check_single_instance(db_path + ".lock")
         self.conn = sqlite3.connect(db_path)
+        self.conn.execute("PRAGMA journal_mode=WAL")  # Enable WAL mode
+        self.cursor = self.conn.cursor()
         self.create_schema()
 
     def create_schema(self):
@@ -66,27 +57,24 @@ class ChatDB:
         self.conn.execute(query)
 
     def create_chat(self, name=None):
-        cursor = self.conn.cursor()  # Create a cursor
         query = "INSERT INTO chats (name) VALUES (?)"
-        cursor.execute(query, (name,))
-        chat_id = cursor.lastrowid  # Access lastrowid from the cursor
+        self.cursor.execute(query, (name,))
+        chat_id = self.cursor.lastrowid  # Access lastrowid from the cursor
         self.conn.commit()
         return chat_id
 
     def add_message(self, chat_id: int, role: str, content: str, function_call_name: Optional[str], function_call_arguments: Optional[str]):
-        cursor = self.conn.cursor()  # Create a cursor
         query = "INSERT INTO messages (chat_id, role, content, function_call_name, function_call_arguments) VALUES (?, ?, ?, ?, ?)"
-        cursor.execute(query, (chat_id, role, content, function_call_name, function_call_arguments))
-        self.conn.commit()
-        last_message_id = cursor.lastrowid
+        with self.conn:
+            self.cursor.execute(query, (chat_id, role, content, function_call_name, function_call_arguments))
+            last_message_id = self.cursor.lastrowid
 
-        if content is not None and role != "function":
-            fts_query = "INSERT INTO messages_fts (message_id, content) VALUES (?, ?)"
-            self.conn.execute(fts_query, (last_message_id, content.lower()))
-            self.conn.commit()
+            if content is not None and role != "function":
+                fts_query = "INSERT INTO messages_fts (message_id, content) VALUES (?, ?)"
+                self.conn.execute(fts_query, (last_message_id, content.lower()))
 
-        query = f"UPDATE chats SET last_update = CURRENT_TIMESTAMP WHERE id = ?"
-        cursor.execute(query, (chat_id, ))
+            query = f"UPDATE chats SET last_update = CURRENT_TIMESTAMP WHERE id = ?"
+            self.cursor.execute(query, (chat_id, ))
 
         return last_message_id
 
