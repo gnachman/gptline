@@ -100,9 +100,16 @@ class ChatDB:
             raise IndexError("Index out of range")
 
     def list_chats(self):
-        query = "SELECT id, name, last_update FROM chats ORDER BY id DESC"
-        result = self.conn.execute(query).fetchall()
-        return result
+      query = """
+      SELECT chats.id, chats.name, chats.last_update, COUNT(messages.id) as num_messages
+      FROM chats
+      LEFT JOIN messages ON chats.id = messages.chat_id
+      GROUP BY chats.id
+      HAVING COUNT(messages.id) > 1
+      ORDER BY chats.id DESC
+      """
+      result = self.conn.execute(query).fetchall()
+      return result
 
     def set_chat_name(self, chat_id: int, name: str):
         query = "UPDATE chats SET name = ? WHERE id = ?"

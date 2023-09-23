@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit import PromptSession, print_formatted_text, Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
@@ -28,6 +28,7 @@ class Chat:
     chat_identifier: int
     name: str
     last_update: str
+    num_messages: int
 
 
 # Returns UserInput
@@ -101,7 +102,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
         print_formatted_text(HTML(f'<b>Select a chat:</b>'))
         show_list = True
         base = 0
-        PAGE_SIZE = 9
+        PAGE_SIZE = Application().output.get_size().rows - 2
         while True:
             i = 0
             for chat in chats[base:]:
@@ -110,7 +111,9 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
                     break
                 if show_list:
                     time = formattedTime(chat.last_update)
-                    print_formatted_text(f'{i}: {chat.name} ({time})')
+                    n = chat.num_messages - 1
+                    s = "s" if n > 1 else ""
+                    print_formatted_text(HTML(f'{i}: <b>{html.escape(chat.name)}</b> ({time}, {n} message{s})'))
             show_list = True
 
             kb = KeyBindings()
@@ -156,7 +159,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
     try:
         while True:
             def bottom_toolbar():
-                text = f'[{html.escape(current_chat_name)}] <b>^D</b>: Send  <b>F2</b>: Switch chat  <b>F3</b>: New chat  <b>F4</b>: Search'
+                text = f'[{html.escape(current_chat_name)}] <b>M-⏎</b>: Send  <b>F2</b>: Switch chat  <b>F3</b>: New chat  <b>F4</b>: Search'
                 if can_regen:
                     text += "  <b>F5</b>: Regenerate"
                     text += "  <b>F6</b>: Edit Last"

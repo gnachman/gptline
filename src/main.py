@@ -201,7 +201,7 @@ class App:
         self.current_chat_id = chat_id
         n = self.chat_db.num_messages(self.current_chat_id)
         self.messages = []
-        for i in range(n):
+        for i in range(1, n):
             (role, self.content, time, message_id, deleted, fname, fargs) = self.chat_db.get_message_by_index(self.current_chat_id, i)
             if self.content is not None:
                 m = {
