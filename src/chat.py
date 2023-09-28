@@ -114,12 +114,19 @@ def invoke(functions, name, args_str):
     try:
         args = simplejson.loads(args_str, strict=False)
     except Exception as e:
-        print("")
-        print(f"ChatGPT called {name} with bad input: {args_str}")
-        raise ValueError("The function arguments did not form a valid JSON document")
+        return invoke_sloppy(functions, name, args_str)
 
     for func in functions:
         if func.__name__ == name:
             return func(**args)
+    else:
+        raise ValueError(f"Function '{name}' not found.")
+
+def invoke_sloppy(functions, name, args_str):
+    for func in functions:
+        if func.__name__ == name and func.sloppy:
+            args = [None] * len(inspect.signature(func).parameters)
+            args[0] = args_str
+            return func(*args)
     else:
         raise ValueError(f"Function '{name}' not found.")

@@ -112,6 +112,9 @@ class App:
                 {k: v for k, v in message.items() if k != 'id'} 
                 for message in self.messages]
         if self.allow_execution:
+            execute_command.sloppy = False
+            create_file.sloppy = False
+            execute_python.sloppy = True
             functions = [execute_command, create_file, execute_python]
         else:
             functions = []
@@ -237,7 +240,7 @@ class App:
                 fspinner.stop()
             return (None, invoke(functions, call_name, call_args), None)
         except Exception as e:
-            return (None, None, e.str)
+            return (None, None, str(e))
 
     def stop_unexpectedly(self, finish_reason):
         print("")
@@ -361,7 +364,7 @@ class App:
         self.messages.append({
             "role": "system",
             "content": error_output})
-        self.message_id = self.chat_db.add_message(
+        message_id = self.chat_db.add_message(
                 self.current_chat_id,
                 self.messages[-1]["role"],
                 self.messages[-1]["content"],
@@ -381,6 +384,7 @@ class App:
             return False
 
 def main():
+    print("Welcome to gptline! Enter a question and press option-Enter to send it.")
     app = App()
     app.run_forever()
 
