@@ -32,7 +32,7 @@ class Chat:
 
 
 # Returns UserInput
-def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution):
+def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution, used, max_tokens):
     result = UserInput()
     result.allow_execution = allow_execution
 
@@ -167,6 +167,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
                     text += "  <b>F7</b>: Disable Execution"
                 else:
                     text += "  <b>F7</b>: Enable Execution"
+                text += f'  {used}/{max_tokens} tokens'
                 return HTML(text)
             value = session.prompt(
                     "",

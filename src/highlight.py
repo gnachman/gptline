@@ -117,7 +117,7 @@ class SyntaxHighlighter:
             elif self.is_block_code and not self.will_enter_block_code and self.buffer.startswith("```\n"):
                 # End a code block
                 if not self.will_enter_block_code:
-                    self.emit(self.end_block(self.block_id))
+                    self.emit(self.end_block(self.block_id) + self.term.normal)
                 self.block_id = None
                 self.will_enter_block_code = False
                 self.buffer = self.buffer[4:]

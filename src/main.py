@@ -12,10 +12,12 @@ from src.search import display_search_results
 from src.spin import Spinner
 from src.ui_utils import draw_horizontal_line, draw_light_horizontal_line
 import html
+import json
 import openai
 import os
 import subprocess
 import sys
+import tiktoken
 import traceback
 from typing import Optional
 
@@ -36,6 +38,8 @@ class App:
         self.chats = []
         self.chat = None
         self.content = None
+        self.model = "gpt-4"
+        self.max_tokens = 8000
 
     def new_chat(self):
         self.current_chat_id = self.chat_db.create_chat("New chat")
@@ -119,7 +123,7 @@ class App:
             functions = [execute_command, create_file, execute_python]
         else:
             functions = []
-        self.chat = create_chat_with_spinner(sanitized, self.temperature, functions)
+        self.chat = create_chat_with_spinner(sanitized, self.temperature, functions, self.model)
         self.content = ""
         sh = SyntaxHighlighter()
         fspinner = None
@@ -159,12 +163,30 @@ class App:
                     current_chat_name,
                     len(self.messages) > 1,
                     self.placeholder,
-                    self.allow_execution)
+                    self.allow_execution,
+                    self.usage(),
+                    self.max_tokens)
             self.allow_execution = user_input.allow_execution
             return user_input 
         except KeyboardInterrupt:
             print("^C")
             exit(0)
+
+    def message_content(self, message):
+        c = message["content"]
+        if c is not None:
+            return c
+        f = message["function_call"]
+        if f is not None:
+            return json.dumps(f)
+        return 0
+
+    def usage(self):
+        text = ""
+        contents = [self.message_content(message) for message in self.messages]
+        text = "\n".join(contents)
+        encoding = tiktoken.encoding_for_model(self.model)
+        return len(encoding.encode(text))
 
     def regenerate(self):
         print("Regenerating response...")
@@ -227,6 +249,7 @@ class App:
                 self.messages.append(m)
             elif fname and fargs:
                 self.messages.append({
+                    "id": message_id,
                     "role": "assistant",
                     "content": None,
                     "function_call": {
@@ -290,7 +313,7 @@ class App:
     def handle_content(self, resp, content, sh):
         chunk = resp.choices[0].delta.content
         content += chunk
-        sh.put(content)
+        sh.put(chunk)
         return content
 
     def accrue_function_call(self, resp, call_name, call_args, fspinner):
@@ -357,7 +380,7 @@ class App:
         sanitized = [
                 {k: v for k, v in message.items() if k != 'id'} 
                 for message in self.messages]
-        self.chat = create_chat(sanitized, self.temperature, functions)
+        self.chat = create_chat(sanitized, self.temperature, functions, self.model)
 
     def commit_error(self, error_output, functions):
         # Something went wrong
@@ -378,7 +401,7 @@ class App:
                     {k: v for k, v in message.items() if k != 'id'} 
                     for message in self.messages]
             print(sanitized)
-            self.chat = create_chat(sanitized, self.temperature, functions)
+            self.chat = create_chat(sanitized, self.temperature, functions, self.model)
             return True
         else:
             print(f"An error was encountered while executing a function: {error_output}")
@@ -411,8 +434,12 @@ def execute_command(command_line: str, input_string: str):
     try:
         process = subprocess.Popen(command_line, shell=True, cwd="/tmp", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         output, _ = process.communicate(input=input_string)
+        print("Program output:")
+        print(output)
+        print("")
         return output.strip()
     except Exception as e:
+        print(f'Exception while executing provided code: {e}')
         return str(e)
 
 def create_file(name: str, content: str):
@@ -424,8 +451,12 @@ def create_file(name: str, content: str):
         content: A string to write to the file.
     """
     print(f"ChatGPT wants to create a file called {name} with the following contents:")
-    print(content)
-    print("")
+    sh = SyntaxHighlighter()
+    sh.put("```")
+    sh.put(content)
+    sh.put("")
+    sh.put("```")
+    sh.eof()
     ok = input(f"OK to create (y/n)? ")
     if ok != "y":
         print("Not running it")
@@ -449,7 +480,13 @@ def execute_python(code: str, input_string: Optional[str]):
         input_string: A string containing input to send to stdin.
     """
     print("ChatGPT wants to run the following Python program:")
-    print(code)
+    sh = SyntaxHighlighter()
+    sh.put("```python\n")
+    sh.put(code)
+    if not code.endswith("\n"):
+        sh.put("\n")
+    sh.put("```")
+    sh.eof()
     print("")
     if input_string:
         print("With this supplied as input:")
@@ -463,6 +500,8 @@ def execute_python(code: str, input_string: Optional[str]):
     try:
         process = subprocess.Popen(["python3", "-c", code], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         stdout, stderr = process.communicate(input=input_string if input_string else "")
+        print("Program output:")
+        print(stdout + stderr)
         if stderr:
             return f"Error: {stderr}"
         return stdout

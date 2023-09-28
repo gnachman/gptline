@@ -75,13 +75,13 @@ def _json_schema(func):
 
     return api_info
 
-def create_chat_with_spinner(messages, temperature, functions):
-    return create_chat(messages, temperature, functions, True)
+def create_chat_with_spinner(messages, temperature, functions, model):
+    return create_chat(messages, temperature, functions, model, True)
 
-def create_chat(messages, temperature, functions, spinner=False):
+def create_chat(messages, temperature, functions, model, spinner=False):
     def create_chat_model():
         args = {
-            "model": "gpt-4",
+            "model": model,
             "messages": messages,
             "stream": True,
             "temperature": temperature,
