@@ -4,6 +4,7 @@ from src.chat import create_chat_with_spinner, suggest_name
 from src.db import ChatDB
 from src.formatting import print_message
 from src.formatting import setMark
+from src.highlight import SyntaxHighlighter
 from src.input_reader import Chat, read_input
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import HTML
@@ -102,7 +103,7 @@ def chat_loop():
                         draw_horizontal_line()
                     else:
                         draw_light_horizontal_line()
-                    print_message(time, role, html.escape(content.rstrip()), deleted)
+                    print_message(time, role, content.rstrip(), deleted)
                     print("")
                     messages.append({
                         "id": message_id,
@@ -130,6 +131,7 @@ def chat_loop():
         sanitized = [{k: v for k, v in message.items() if k != 'id'} for message in messages]
         chat = create_chat_with_spinner(sanitized, temperature)
         content = ""
+        sh = SyntaxHighlighter()
         try:
             for resp in chat:
                 if resp.choices[0].finish_reason:
@@ -140,11 +142,12 @@ def chat_loop():
                     break
                 chunk = resp.choices[0].delta.content
                 content += chunk
-                sys.stdout.write(chunk)
-                sys.stdout.flush()
+                sh.put(chunk)
+            sh.eof()
             print("")
             print("")
         except KeyboardInterrupt:
+            sh.eof()
             chat.close()
             print("")
         messages.append({"role": "assistant", "content": content})
