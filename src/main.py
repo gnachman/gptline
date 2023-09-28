@@ -4,6 +4,7 @@ from src.chat import create_chat, create_chat_with_spinner, suggest_name, invoke
 from src.db import ChatDB
 from src.formatting import print_message
 from src.formatting import setMark
+from src.highlight import SyntaxHighlighter
 from src.input_reader import Chat, read_input
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import HTML
@@ -120,15 +121,17 @@ class App:
             functions = []
         self.chat = create_chat_with_spinner(sanitized, self.temperature, functions)
         self.content = ""
+        sh = SyntaxHighlighter()
         fspinner = None
         try:
             # There can be more than one chat when there's a function call.
-            while self.read_response(functions):
+            while self.read_response(functions, sh):
                 pass
-
+            sh.eof()
             print("")
             print("")
         except KeyboardInterrupt:
+            sh.eof()
             self.chat.close()
             print("")
         self.commit_ordinary()
@@ -219,7 +222,7 @@ class App:
                         draw_horizontal_line()
                     else:
                         draw_light_horizontal_line()
-                    print_message(time, role, html.escape(self.content.rstrip()), deleted)
+                    print_message(time, role, self.content.rstrip(), deleted)
                     print("")
                 self.messages.append(m)
             elif fname and fargs:
@@ -246,7 +249,7 @@ class App:
         print("")
         print(f"Stopping because {finish_reason}")
 
-    def read_response(self, functions):
+    def read_response(self, functions, sh):
         """Read an entire response and handle it. Return True to call this again."""
         fspinner = None
         try:
@@ -267,7 +270,7 @@ class App:
                         self.stop_unexpectedly(finish_reason)
                     break
                 elif "content" in resp.choices[0].delta and resp.choices[0].delta.content:
-                    self.content = self.handle_content(resp, self.content)
+                    self.content = self.handle_content(resp, self.content, sh)
                 elif "function_call" in resp.choices[0].delta and resp.choices[0].delta.function_call and self.allow_execution:
                     call_name, call_args, fspinner = self.accrue_function_call(
                             resp, call_name, call_args, fspinner)
@@ -284,11 +287,10 @@ class App:
                 fspinner.stop()
                 fspinner = None
 
-    def handle_content(self, resp, content):
+    def handle_content(self, resp, content, sh):
         chunk = resp.choices[0].delta.content
         content += chunk
-        sys.stdout.write(chunk)
-        sys.stdout.flush()
+        sh.put(content)
         return content
 
     def accrue_function_call(self, resp, call_name, call_args, fspinner):
