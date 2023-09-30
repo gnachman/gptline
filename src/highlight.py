@@ -40,6 +40,7 @@ class SyntaxHighlighter:
         self.prev_attrs = []
         self.markup_eligible = True
         self.line = ""
+        self.language = None
         darkTheme = Theme(background_color(55, 55, 55),
                           foreground_color(215, 215, 215),
                           background_color(15, 15, 15),
@@ -107,7 +108,10 @@ class SyntaxHighlighter:
                 if len(first) > 4:
                   # Print language
                   print(self.theme.code_block_banner_bg + self.theme.code_block_banner_fg, end='')
-                  print(first[3:] + self.erase_line() + "    " + self.hyperlink(f"iterm2:copy-block?block={self.block_id}", "[📋 Copy to clipboard]") + self.term.normal)
+                  print(first[3:] + self.erase_line() + "    " + self.copyButton(self.block_id) + " " + self.hyperlink(f"iterm2:copy-block?block={self.block_id}", "Copy to clipboard") + self.term.normal)
+                  self.language = first[3:]
+                else:
+                  self.language = "text/plain"
                 try:
                     self.lexer = get_lexer_by_name(first[3:])
                 except:
@@ -135,6 +139,9 @@ class SyntaxHighlighter:
             else:
                 self.printFirst()
 
+    def copyButton(self, block_id):
+        return self.osc(1337) + f'Button=type=copy;block={block_id}' + self.st()
+
     def erase_line(self):
         return '\033[K'
 
@@ -147,11 +154,11 @@ class SyntaxHighlighter:
     def hyperlink(self, href, anchor):
         return self.osc(8) + f';{href}' + self.st() + anchor + self.osc(8) + ';' + self.st()
 
-    def start_block(self, id):
-        return self.osc(1337) + f'Block=attr=start;id={id}' + self.st()
+    def start_block(self, id, type):
+        return self.osc(1337) + f'Block=attr=start;id={id};type={type}' + self.st()
 
     def end_block(self, id):
-        return self.osc(1337) + f'Block=attr=end;id={id}' + self.st()
+        return self.osc(1337) + f'Block=attr=end;id={id};render=0' + self.st()
 
     def eof(self):
         while len(self.buffer) > 0:
@@ -171,7 +178,7 @@ class SyntaxHighlighter:
             attrs.append(self.theme.code_block_bg)
         if self.will_enter_block_code:
             self.emit(self.theme.code_block_bg + self.erase_line())
-            self.emit(self.start_block(self.block_id))
+            self.emit(self.start_block(self.block_id, self.language))
             self.will_enter_block_code = False
             attrs.append(self.theme.code_block_bg)
         if self.lexer:
