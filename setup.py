@@ -5,7 +5,7 @@ with open("requirements.txt") as f:
 
 setup(
     name="gptline",
-    version="1.0.5",
+    version="1.0.6",
     packages=["src"],
     install_requires=requirements,
     entry_points={
