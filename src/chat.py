@@ -98,17 +98,20 @@ def create_chat(messages, temperature, functions, model, spinner=False):
 
 
 def suggest_name(chat_id, message):
-    chat_completion_resp = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You assign names to conversations based on the first message. Respond with only a short, descriptive title for a conversation."},
-            {"role": "user", "content": message}
-        ],
-        temperature=0,
-        max_tokens=10
-    )
-    name = chat_completion_resp.choices[0].message.content
-    return (chat_id, name)
+    try:
+        chat_completion_resp = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You assign names to conversations based on the first message. Respond with only a short, descriptive title for a conversation."},
+                {"role": "user", "content": message}
+            ],
+            temperature=0,
+            max_tokens=10
+        )
+        name = chat_completion_resp.choices[0].message.content
+        return (chat_id, name)
+    except Exception as e:
+        return None
 
 def invoke(functions, name, args_str):
     try:

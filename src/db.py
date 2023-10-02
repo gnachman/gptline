@@ -1,6 +1,7 @@
 import sqlite3
 from typing import Optional
 import fcntl
+import json
 import os
 import sys
 
@@ -52,6 +53,14 @@ class ChatDB:
             message_id UNINDEXED,
             content,
             content_rowid,
+        )
+        """
+        self.conn.execute(query)
+
+        query = """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT NOT NULL UNIQUE,
+            value TEXT NOT NULL
         )
         """
         self.conn.execute(query)
@@ -175,4 +184,23 @@ class ChatDB:
         pagination_token = next_offset if has_more_results else None
 
         return messages_by_chat, offset + len(message_ids)
+
+    def get_setting(self, name: str, default_value=None):
+        query = "SELECT value FROM settings WHERE key = ?"
+        cursor = self.conn.execute(query, (name,))
+        result = cursor.fetchone()
+        if result:
+            try:
+                return json.loads(result[0])
+            except json.JSONDecodeError:
+                return default_value
+        else:
+            return default_value
+
+    def set_setting(self, name: str, value):
+        encoded_value = json.dumps(value)
+        query = "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
+        self.conn.execute(query, (name, encoded_value))
+        self.conn.commit()
+
 

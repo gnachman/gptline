@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
+from dataclasses import dataclass
 from src.background_task import BackgroundTask
 from src.chat import create_chat, create_chat_with_spinner, suggest_name, invoke
 from src.db import ChatDB
 from src.formatting import print_message
 from src.formatting import setMark
 from src.highlight import SyntaxHighlighter
-from src.input_reader import Chat, read_input
+from src.input_reader import Chat, read_input, usage
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import HTML
 from src.search import display_search_results
@@ -19,12 +20,24 @@ import subprocess
 import sys
 import tiktoken
 import traceback
-from typing import Optional
+from typing import Optional, Any, Callable
 
 openai.api_key = os.environ.get("OPENAI_KEY")
 if not openai.api_key:
     print("Set the environment variable OPENAI_KEY to your api secret key")
     exit(1)
+
+@dataclass
+class Setting:
+    name: str
+    key: str
+    # Take a decoded value and save it into APp
+    load: Callable
+    default: Any
+    # Returns a decoded value
+    value: Callable
+    # Take a string from the user and return a value that can be json encoded for storage. Throw if the value is bad.
+    decode: Callable
 
 class App:
     def __init__(self):
@@ -38,8 +51,9 @@ class App:
         self.chats = []
         self.chat = None
         self.content = None
-        self.model = "gpt-4"
         self.max_tokens = 8000
+        self.load_settings()
+        self.print_settings()
 
     def new_chat(self):
         self.current_chat_id = self.chat_db.create_chat("New chat")
@@ -70,6 +84,9 @@ class App:
         if not user_input:
             # Empty query means to quit.
             return False
+        if user_input.settings:
+            self.do_settings()
+            return
         if user_input.regenerate:
             # Delete the last response and preceding prompt, and act as though
             # the user retyped it.
@@ -123,7 +140,11 @@ class App:
             functions = [execute_command, create_file, execute_python]
         else:
             functions = []
-        self.chat = create_chat_with_spinner(sanitized, self.temperature, functions, self.model)
+        try:
+            self.chat = create_chat_with_spinner(sanitized, self.temperature, functions, self.model)
+        except Exception as e:
+            print(f"Failed to create chat: {e}")
+            return
         self.content = ""
         sh = SyntaxHighlighter()
         fspinner = None
@@ -143,11 +164,67 @@ class App:
         # Check if any tasks are done.
         self.check_tasks()
 
+    def set_model(self, model):
+        self.model = model
+
+    def validate_model(self, model):
+        try:
+            tiktoken.encoding_for_model(model)
+        except KeyError:
+            raise Exception("Unsupported model")
+        return model
+
+    def settings(self):
+        return [Setting(
+            "Model",
+            "model",
+            lambda s: self.set_model(s),
+            "gpt-3.5-turbo",
+            lambda: self.model,
+            lambda s: self.validate_model(s))]
+
+    def load_settings(self):
+        for setting in self.settings():
+            setting.load(self.chat_db.get_setting(setting.key, setting.default))
+
+    def print_settings(self): 
+        for setting in self.settings():
+            print(f'{setting.name}: {setting.value()}')
+
+    def do_settings(self):
+        self.load_settings()
+        i = 1
+        settings = self.settings()
+        for setting in settings:
+            print(f'({i}) {setting.name}: {setting.value()}')
+            i += 1
+        num = input("Enter the number of the setting to enter or press return to cancel: ")
+        try:
+            num = int(num) - 1
+            if num < 0 or num >= len(settings):
+                print("Invalid number")
+                return
+            setting = settings[num]
+            value = input(f"Enter new value for {setting.name}: ")
+            if not value:
+                print("Cancel")
+                return
+            try:
+                self.chat_db.set_setting(setting.key, setting.decode(value))
+            except Exception as e:
+                print(f"Bad value: {e}")
+                return
+            self.load_settings()
+        except ValueError:
+            print("Cancel")
+            return
+
     def check_tasks(self):
         for task in self.tasks:
             if task.done():
-                (chat_id, name) = task.result()
-                self.chat_db.set_chat_name(chat_id, name)
+                if not task.exception:
+                    (chat_id, name) = task.result()
+                    self.chat_db.set_chat_name(chat_id, name)
             self.tasks = [task for task in self.tasks if not task.done()]
 
     def get_chat_name(self):
@@ -165,7 +242,8 @@ class App:
                     self.placeholder,
                     self.allow_execution,
                     self.usage(),
-                    self.max_tokens)
+                    self.max_tokens,
+                    self.model)
             self.allow_execution = user_input.allow_execution
             return user_input 
         except KeyboardInterrupt:
@@ -185,8 +263,7 @@ class App:
         text = ""
         contents = [self.message_content(message) for message in self.messages]
         text = "\n".join(contents)
-        encoding = tiktoken.encoding_for_model(self.model)
-        return len(encoding.encode(text))
+        return usage(self.model, text)
 
     def regenerate(self):
         print("Regenerating response...")
@@ -380,7 +457,10 @@ class App:
         sanitized = [
                 {k: v for k, v in message.items() if k != 'id'} 
                 for message in self.messages]
-        self.chat = create_chat(sanitized, self.temperature, functions, self.model)
+        try:
+            self.chat = create_chat(sanitized, self.temperature, functions, self.model)
+        except Exception as e:
+            print(f"Failed to create chat: {e}")
 
     def commit_error(self, error_output, functions):
         # Something went wrong
@@ -401,7 +481,11 @@ class App:
                     {k: v for k, v in message.items() if k != 'id'} 
                     for message in self.messages]
             print(sanitized)
-            self.chat = create_chat(sanitized, self.temperature, functions, self.model)
+            try:
+                self.chat = create_chat(sanitized, self.temperature, functions, self.model)
+            except Exception as e:
+                print(f"Failed to create chat: {e}")
+                return False
             return True
         else:
             print(f"An error was encountered while executing a function: {error_output}")

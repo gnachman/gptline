@@ -238,10 +238,10 @@ def is_background_dark():
         # Extract the background color information from the response
         match = re.search(r'rgb:([0-9a-fA-F]{4})/([0-9a-fA-F]{4})/([0-9a-fA-F]{4})', response)
         if match:
-            r = int(match.group(1), 16)
-            g = int(match.group(2), 16)
-            b = int(match.group(3), 16)
-            luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 1000
+            r = int(match.group(1), 16) / 65535.0
+            g = int(match.group(2), 16) / 65535.0
+            b = int(match.group(3), 16) / 65535.0
+            luminance = (0.299 * r + 0.587 * g + 0.114 * b)
             return luminance < 0.5
 
         return False

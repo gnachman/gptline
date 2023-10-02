@@ -4,11 +4,16 @@ class BackgroundTask:
     def __init__(self, func):
         self._thread = threading.Thread(target=self._run, args=(func,))
         self._result = None
+        self.exception = None
         self._done = False
         self._thread.start()
 
     def _run(self, func):
-        self._result = func()
+        try:
+            self._result = func()
+        except Exception as e:
+            print(e)
+            self.exception = e
         self._done = True
 
     def done(self):

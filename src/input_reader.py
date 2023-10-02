@@ -12,6 +12,7 @@ from src.formatting import formattedTime
 from src.ui_utils import draw_horizontal_line
 from typing import Optional
 import html
+import tiktoken
 
 @dataclass
 class UserInput:
@@ -22,6 +23,7 @@ class UserInput:
     regenerate = False
     edit = False
     allow_execution = False
+    settings = False
 
 @dataclass
 class Chat:
@@ -30,13 +32,28 @@ class Chat:
     last_update: str
     num_messages: int
 
+def usage(model, text):
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        return len(encoding.encode(text))
+    except Exception as e:
+        return 0
+
 
 # Returns UserInput
-def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution, used, max_tokens):
+def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution, used, max_tokens, model):
     result = UserInput()
+    tokens_typed = [0]
     result.allow_execution = allow_execution
 
     session = PromptSession()
+
+    def update_tokens_typed(_):
+        buffer = session.default_buffer
+        tokens_typed[0] = usage(model, buffer.text)
+        session.app.invalidate()
+
+    session.default_buffer.on_text_changed += update_tokens_typed
     kb = KeyBindings()
 
     # Add a binding for the 'Enter' key to insert a newline character
@@ -59,6 +76,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
     REGENERATE = "$$$REGENERATE"
     EDIT = "$$$EDIT"
     TOGGLE_SETTING = "$$$TOGGLE_SETTING"
+    SETTINGS = "$$$SETTINGS"
 
     @kb.add(Keys.F2)
     def _(event):
@@ -94,6 +112,12 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
             print("Command execution disabled.")
         app = get_app()
         app.exit(result=TOGGLE_SETTING)
+
+    @kb.add(Keys.F10)
+    def _(event):
+        app = get_app()
+        app.exit(result=SETTINGS)
+
     def read_search_query():
         search_session = PromptSession()
         return search_session.prompt(HTML("<b>Search: </b>"))
@@ -167,7 +191,13 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
                     text += "  <b>F7</b>: Disable Execution"
                 else:
                     text += "  <b>F7</b>: Enable Execution"
-                text += f'  {used}/{max_tokens} tokens'
+                text += "  "
+                total_used = used + tokens_typed[0]
+                if total_used >= max_tokens:
+                  text += "<ansired>"
+                text += f'{total_used}/{max_tokens} tokens'
+                if total_used >= max_tokens:
+                  text += "</ansired>"
                 return HTML(text)
             value = session.prompt(
                     "",
@@ -198,6 +228,9 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
                         return result
                 except EOFError:
                     pass
+            elif value == SETTINGS:
+                result.settings = True
+                return result
             else:
                 result.text = value
                 return result
