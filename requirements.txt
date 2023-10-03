@@ -4,3 +4,5 @@ simplejson
 blessings
 pygments
 tiktoken
+html2text
+newspaper3k

@@ -12,8 +12,10 @@ from prompt_toolkit.formatted_text import HTML
 from src.search import display_chat_search_results, display_search_results
 from src.spin import Spinner
 from src.ui_utils import draw_horizontal_line, draw_light_horizontal_line
+from src.convo import TextMessage, Conversation
 import html
 import json
+from newspaper import Article
 import openai
 import os
 import subprocess
@@ -21,6 +23,8 @@ import sys
 import tiktoken
 import traceback
 from typing import Optional, Any, Callable
+import requests
+from html2text import html2text
 
 openai.api_key = os.environ.get("OPENAI_KEY")
 if not openai.api_key:
@@ -157,7 +161,11 @@ class App:
             execute_command.sloppy = False
             create_file.sloppy = False
             execute_python.sloppy = True
-            functions = [execute_command, create_file, execute_python]
+            fetch_web_page.sloppy = True
+            functions = [execute_command, create_file, execute_python, fetch_web_page, summarize_web_page]
+            summarize_web_page.app = self
+            if os.environ.get("AZURE_KEY"):
+                functions.append(bing_search)
         else:
             functions = []
         try:
@@ -684,3 +692,62 @@ def execute_python(code: str, input_string: Optional[str]):
         return stdout
     except Exception as e:
         return f"Error: {str(e)}"
+
+def fetch_web_page(url: str):
+    """
+    Load a web page. Convert it to markdown and return. If something goes wrong, return a string like "404 error while fetching {url}".
+
+    Args:
+        url: The URL to fetch
+    """
+    print(f'Fetch {url}')
+    return do_fetch(url)
+
+def do_fetch(url):
+    article = Article(url)
+    article.download()
+    article.parse()
+    text = article.text
+    if text:
+        return text
+    markdown_content = html2text(article.html)
+    return markdown_content
+
+
+def bing_search(query: str):
+    """
+    Perform a web search. Returns a markdown document with search results.
+
+    Args:
+        query: The websearch query string
+    """
+    print(f'Search Bing for {query}')
+    subscription_key = os.environ.get("AZURE_KEY")
+    search_url = "https://api.bing.microsoft.com/v7.0/search"
+    search_term = query
+    headers = {"Ocp-Apim-Subscription-Key": subscription_key}
+    params = {"q": search_term, "textDecorations": True, "textFormat": "HTML"}
+    response = requests.get(search_url, headers=headers, params=params)
+    response.raise_for_status()
+    search_results = response.json()
+    values = [f' * [{v["url"]}]({v["snippet"]})' for v in search_results["webPages"]["value"]]
+    return "\n".join(values)
+
+def summarize_web_page(url: str):
+    """
+    Load and summarizes a web page. Returns an English summary of the web page's contents.
+
+    Args:
+        url: The URL to fetch
+    """
+    print(f'Summarize {url}')
+    content = do_fetch(url)
+    print(f'content is {content}')
+    if not content:
+        print("The page was empty")
+        return "The page was empty"
+    c = Conversation(summarize_web_page.app.model, "I will give you the contents of a web page and you will return a one-paragraph summary.")
+    message = TextMessage.user(content)
+    summary = c.send(message)
+    print(f'summary is {summary}')
+    return summary

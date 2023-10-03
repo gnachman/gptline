@@ -78,12 +78,12 @@ def _json_schema(func):
 def create_chat_with_spinner(messages, temperature, functions, model):
     return create_chat(messages, temperature, functions, model, True)
 
-def create_chat(messages, temperature, functions, model, spinner=False):
+def create_chat(messages, temperature, functions, model, spinner=False, stream=True):
     def create_chat_model():
         args = {
             "model": model,
             "messages": messages,
-            "stream": True,
+            "stream": stream,
             "temperature": temperature,
         }
         if functions:
