@@ -12,7 +12,6 @@ from prompt_toolkit.formatted_text import HTML
 from src.search import display_chat_search_results, display_search_results
 from src.spin import Spinner
 from src.ui_utils import draw_horizontal_line, draw_light_horizontal_line
-from src.convo import TextMessage, Conversation
 import html
 import json
 from newspaper import Article
@@ -733,21 +732,3 @@ def bing_search(query: str):
     values = [f' * [{v["url"]}]({v["snippet"]})' for v in search_results["webPages"]["value"]]
     return "\n".join(values)
 
-def summarize_web_page(url: str):
-    """
-    Load and summarizes a web page. Returns an English summary of the web page's contents.
-
-    Args:
-        url: The URL to fetch
-    """
-    print(f'Summarize {url}')
-    content = do_fetch(url)
-    print(f'content is {content}')
-    if not content:
-        print("The page was empty")
-        return "The page was empty"
-    c = Conversation(summarize_web_page.app.model, "I will give you the contents of a web page and you will return a one-paragraph summary.")
-    message = TextMessage.user(content)
-    summary = c.send(message)
-    print(f'summary is {summary}')
-    return summary
