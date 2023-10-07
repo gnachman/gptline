@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 with open("requirements.txt") as f:
     requirements = f.read().splitlines()
@@ -6,7 +6,7 @@ with open("requirements.txt") as f:
 setup(
     name="gptline",
     version="1.0.7",
-    packages=["src"],
+    packages=find_packages(),
     install_requires=requirements,
     entry_points={
         "console_scripts": [
