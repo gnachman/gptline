@@ -24,6 +24,13 @@ def print_message(timestamp, role, content, deleted, prefix=""):
     else:
         print(content, end='')
 
+def print_snippet(timestamp, role, content, deleted, prefix=""):
+    s = prefix + f"[{html.escape(formattedTime(timestamp))}] <i>{html.escape(role)}</i>: " + content
+    if deleted:
+        print_formatted_text(HTML("<strike>" + s + "</strike>"))
+    else:
+        print_formatted_text(HTML(s))
+
 
 def setMark():
     if 'TERM' in os.environ and os.environ['TERM'].startswith('screen'):

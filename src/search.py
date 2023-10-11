@@ -1,6 +1,6 @@
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import HTML
-from src.formatting import print_message
+from src.formatting import print_snippet
 import html
 
 def display_search_results(query, messages_by_chat, chat_db):
@@ -13,7 +13,7 @@ def display_search_results(query, messages_by_chat, chat_db):
             for (message_id, snippet) in message_ids:
                 role, content, timestamp, _id, deleted = chat_db.get_message_by_id(message_id)
                 escaped_snippet = html.escape(snippet).replace('\ue000', '<b>').replace('\ue001', '</b>').replace('\n', ' ')
-                print_message(timestamp, role, escaped_snippet, deleted, "    ")
+                print_snippet(timestamp, role, escaped_snippet, deleted, "    ")
 
         # Prompt the user to either select a chat or request more results
         try:
