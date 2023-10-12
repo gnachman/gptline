@@ -20,6 +20,7 @@ class UserInput:
     # -1 to create a new chat.
     chat_identifier: Optional[int] = None
     query: Optional[str] = None
+    message_query: Optional[str] = None
     regenerate = False
     edit = False
     allow_execution = False
@@ -41,7 +42,7 @@ def usage(model, text):
 
 
 # Returns UserInput
-def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution, used, max_tokens, model):
+def read_input(chats, current_chat_name, have_any_messages, placeholder, allow_execution, used, max_tokens, model):
     result = UserInput()
     tokens_typed = [0]
     result.allow_execution = allow_execution
@@ -73,6 +74,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
     SHOW_CHAT_LIST = "$$$SHOW_CHAT_LIST"
     NEW_CHAT = "$$$NEW_CHAT"
     SEARCH = "$$$SEARCH"
+    SEARCH_THIS_CHAT = "$$$SEARCH_THIS_CHAT"
     REGENERATE = "$$$REGENERATE"
     EDIT = "$$$EDIT"
     TOGGLE_SETTING = "$$$TOGGLE_SETTING"
@@ -93,7 +95,7 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
         app = get_app()
         app.exit(result=SEARCH)
 
-    if can_regen:
+    if have_any_messages:
         @kb.add(Keys.F5)
         def _(event):
             app = get_app()
@@ -113,10 +115,19 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
         app = get_app()
         app.exit(result=TOGGLE_SETTING)
 
+    @kb.add(Keys.F8)
+    def _(event):
+        app = get_app()
+        app.exit(result=SEARCH_THIS_CHAT)
+
     @kb.add(Keys.F10)
     def _(event):
         app = get_app()
         app.exit(result=SETTINGS)
+
+    def read_chat_search_query():
+        search_session = PromptSession()
+        return search_session.prompt(HTML("<b>Search this chat: </b>"))
 
     def read_search_query():
         search_session = PromptSession()
@@ -184,13 +195,16 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
         while True:
             def bottom_toolbar():
                 text = f'[{html.escape(current_chat_name)}] <b>M-⏎</b>: Send  <b>F2</b>: Switch chat  <b>F3</b>: New chat  <b>F4</b>: Search'
-                if can_regen:
+                if have_any_messages:
                     text += "  <b>F5</b>: Regenerate"
                     text += "  <b>F6</b>: Edit Last"
                 if result.allow_execution:
                     text += "  <b>F7</b>: Disable Execution"
                 else:
                     text += "  <b>F7</b>: Enable Execution"
+                if have_any_messages:
+                    text += "  <b>F8</b>: Search Current Chat"
+                text += "  <b>F10</b>: Settings"
                 text += "  "
                 total_used = used + tokens_typed[0]
                 if total_used >= max_tokens:
@@ -221,6 +235,13 @@ def read_input(chats, current_chat_name, can_regen, placeholder, allow_execution
             elif value == EDIT:
                 result.edit = True
                 return result
+            elif value == SEARCH_THIS_CHAT:
+                try:
+                    result.message_query = read_chat_search_query()
+                    if result.message_query is not None:
+                        return result
+                except EOFError:
+                    pass
             elif value == SEARCH:
                 try:
                     result.query = read_search_query()

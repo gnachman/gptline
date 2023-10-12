@@ -9,7 +9,7 @@ from src.highlight import SyntaxHighlighter
 from src.input_reader import Chat, read_input, usage
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import HTML
-from src.search import display_search_results
+from src.search import display_chat_search_results, display_search_results
 from src.spin import Spinner
 from src.ui_utils import draw_horizontal_line, draw_light_horizontal_line
 import html
@@ -31,13 +31,20 @@ if not openai.api_key:
 class Setting:
     name: str
     key: str
-    # Take a decoded value and save it into APp
+    # Take a decoded value and save it into App
     load: Callable
     default: Any
     # Returns a decoded value
     value: Callable
     # Take a string from the user and return a value that can be json encoded for storage. Throw if the value is bad.
     decode: Callable
+
+def str_to_bool(s):
+    if s.lower() == "y" or s.lower() == "t" or s.lower() == "true":
+      return True
+    if s.lower() == "n" or s.lower() == "f" or s.lower() == "false":
+      return False
+    raise Exception("Boolean values must be 'true' or 'false'")
 
 class App:
     def __init__(self):
@@ -54,6 +61,7 @@ class App:
         self.max_tokens = 8000
         self.load_settings()
         self.print_settings()
+        self.index_all_chats()
 
     def new_chat(self):
         self.current_chat_id = self.chat_db.create_chat("New chat")
@@ -103,6 +111,8 @@ class App:
                 user_input.chat_identifier = new_i
             else:
                 return True
+        if user_input.message_query:
+            self.search_messages(user_input.message_query)
         if user_input.chat_identifier:
             if user_input.chat_identifier < 0:
                 print_formatted_text(HTML(f'<b>Starting a new chat</b>'))
@@ -129,10 +139,20 @@ class App:
             {"role": "user", "content": message},
         )
         message_id = self.chat_db.add_message(self.current_chat_id, "user", message, None, None)
+        self.update_chat_fulltext()
         self.messages[-1]["id"] = message_id
         sanitized = [
                 {k: v for k, v in message.items() if k != 'id'} 
                 for message in self.messages]
+        if self.auto_truncate:
+            truncated = 0
+            while len(sanitized) > 1 and self.usage(sanitized) + 500 > self.max_tokens:
+                del sanitized[0]
+                truncated += 1
+            if truncated:
+                s = "s" if truncated != 1 else ""
+                print_formatted_text(HTML(f'<em>Warning: token limit exceeded. {truncated} message{s} dropped.</em>'))
+
         if self.allow_execution:
             execute_command.sloppy = False
             create_file.sloppy = False
@@ -175,13 +195,24 @@ class App:
         return model
 
     def settings(self):
-        return [Setting(
-            "Model",
-            "model",
-            lambda s: self.set_model(s),
-            "gpt-3.5-turbo",
-            lambda: self.model,
-            lambda s: self.validate_model(s))]
+        return [
+                Setting(
+                    "Model",
+                    "model",
+                    lambda s: self.set_model(s),
+                    "gpt-3.5-turbo",
+                    lambda: self.model,
+                    lambda s: self.validate_model(s)),
+                Setting(
+                    "Auto-truncate",
+                    "auto-truncate",
+                    lambda s: self.set_auto_truncate(s),
+                    True,
+                    lambda: self.auto_truncate,
+                    lambda s: str_to_bool(s))]
+
+    def set_auto_truncate(self, value):
+        self.auto_truncate = value
 
     def load_settings(self):
         for setting in self.settings():
@@ -241,7 +272,7 @@ class App:
                     len(self.messages) > 1,
                     self.placeholder,
                     self.allow_execution,
-                    self.usage(),
+                    self.usage(self.messages),
                     self.max_tokens,
                     self.model)
             self.allow_execution = user_input.allow_execution
@@ -259,9 +290,9 @@ class App:
             return json.dumps(f)
         return 0
 
-    def usage(self):
+    def usage(self, messages):
         text = ""
-        contents = [self.message_content(message) for message in self.messages]
+        contents = [self.message_content(message) for message in messages]
         text = "\n".join(contents)
         return usage(self.model, text)
 
@@ -281,9 +312,39 @@ class App:
         self.chat_db.delete_message(self.messages[-1]["id"])
         self.messages = self.messages[:-1]
 
+    def search_messages(self, query):
+        """Search messages in the current chat"""
+        results = self.chat_db.search_messages_in_chat(query, self.current_chat_id)
+        i = 1
+        for message_id in results:
+            draw_light_horizontal_line()
+            print_formatted_text(HTML(f'<b>Message {i} of {len(results)}</b>'))
+            i += 1
+            role, content, timestamp, mid, deleted = self.chat_db.get_message_by_id(message_id)
+            print_message(timestamp, role, content, deleted)
+            print("")
+
     def search(self, query):
         """Returns id of chat to switch to or else None.
         A negative id means to create a new chat."""
+        i = None
+        cursor = None
+        PAGE_SIZE = 10
+        while True:
+            search_results, cursor = self.chat_db.search_chats(query, cursor, PAGE_SIZE)
+            if not len(search_results):
+                print("No results")
+                return None
+            i = display_chat_search_results(query, search_results, self.chat_db)
+            if i is None:
+                cursor += PAGE_SIZE
+                continue
+            if i < 0:
+                return -1
+            return i
+
+
+    def search_by_message(self, query):
         i = None
         cursor = None
         PAGE_SIZE = 10
@@ -300,7 +361,7 @@ class App:
                 return -1
             return i
 
-    def switch(self, chat_id):
+    def switch(self, chat_id, show=True):
         """Replace self.messages with contents of chat_id and also print the
         messages to the screen. As a side-effect, set self.current_chat_id."""
         self.current_chat_id = chat_id
@@ -317,12 +378,13 @@ class App:
                 if role == "function":
                     m["name"] = fname
                 else:
-                    if role == "user":
-                        draw_horizontal_line()
-                    else:
-                        draw_light_horizontal_line()
-                    print_message(time, role, self.content.rstrip(), deleted)
-                    print("")
+                    if show:
+                        if role == "user":
+                            draw_horizontal_line()
+                        else:
+                            draw_light_horizontal_line()
+                        print_message(time, role, self.content.rstrip(), deleted)
+                        print("")
                 self.messages.append(m)
             elif fname and fargs:
                 self.messages.append({
@@ -407,6 +469,35 @@ class App:
                 call_args = resp.choices[0].delta.function_call.arguments
         return (call_name, call_args, fspinner)
 
+    def index_all_chats(self):
+        if self.chat_db.get_kv("chat_fts_migration") == "done":
+            return
+        print("Re-indexing all chats for better full text search. This could take a second.")
+        saved = self.current_chat_id
+        for info in self.chat_db.list_chats():
+            cid = info[0]
+            self.switch(cid, False)
+            self.update_chat_fulltext()
+        self.current_chat_id = saved
+        print("Done")
+        self.chat_db.set_kv("chat_fts_migration", "done")
+
+    def update_chat_fulltext(self):
+        content = self.get_chat_name() + "\n" + "\n".join([self.plaintext_message(m) for m in self.messages])
+        self.chat_db.set_chat_fulltext(self.current_chat_id, content)
+
+    def plaintext_message(self, m):
+        if m["role"] == "assistant":
+            role = "Assistant"
+        elif m["role"] == "user":
+            role = "User"
+        else:
+            return ""
+        if "content" not in m:
+            return ""
+        content = m["content"]
+        return f'{role}: {content}'
+
     def commit_special(self, call_name, call_args, function_output,
             error_output, functions):
         if call_name and call_args:
@@ -428,6 +519,7 @@ class App:
                 None,
                 None)
         self.messages[-1]["id"] = message_id
+        self.update_chat_fulltext()
 
     def commit_function_call_request(self, call_name, call_args):
         # Record that a function call was requested
@@ -440,6 +532,7 @@ class App:
         message_id = self.chat_db.add_message(self.current_chat_id,
                 self.messages[-1]["role"], self.messages[-1]["content"], call_name, call_args)
         self.messages[-1]["id"] = message_id
+        self.update_chat_fulltext()
 
     def commit_function_output(self, functions, call_name, function_output):
         # Record the output of the function call

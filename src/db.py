@@ -58,7 +58,23 @@ class ChatDB:
         self.conn.execute(query)
 
         query = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS chat_fts USING FTS5 (
+            chat_id UNINDEXED,
+            content
+        )
+        """
+        self.conn.execute(query)
+
+        query = """
         CREATE TABLE IF NOT EXISTS settings (
+            key TEXT NOT NULL UNIQUE,
+            value TEXT NOT NULL
+        )
+        """
+        self.conn.execute(query)
+
+        query = """
+        CREATE TABLE IF NOT EXISTS kvs (
             key TEXT NOT NULL UNIQUE,
             value TEXT NOT NULL
         )
@@ -86,6 +102,19 @@ class ChatDB:
             self.cursor.execute(query, (chat_id, ))
 
         return last_message_id
+
+    def set_chat_fulltext(self, chat_id, content):
+        # Remove existing chat_fts row with chat_id
+        delete_query = "DELETE FROM chat_fts WHERE chat_id = ?"
+        self.cursor.execute(delete_query, (chat_id,))
+
+        # Insert new chat_fts row with chat_id and content
+        insert_query = "INSERT INTO chat_fts (chat_id, content) VALUES (?, ?)"
+        self.cursor.execute(insert_query, (chat_id, content))
+
+        # Commit the changes
+        self.conn.commit()
+
 
     def num_messages(self, chat_id: int) -> int:
         query = "SELECT COUNT(*) FROM messages WHERE chat_id = ?"
@@ -143,11 +172,57 @@ class ChatDB:
         self.conn.execute(query, (message_id,))
         self.conn.commit()
 
-    def search_messages(self, query: str, pagination_token: int, limit: int):
+    def tokenize_fts(self, query):
+        words = query.split(" ")
+        escaped_words = [word.replace('"', '""') for word in words]
+        quoted_words = [f'"{w}"' for w in escaped_words]
+        return " ".join(quoted_words)
+
+    def search_chats(self, query: str, pagination_token: int, limit: int):
+        """
+        Searches chats across the contents of messages.
+        Returns ([(chat ID, snippet), ...], next pagination token)
+        """
+
+        query = self.tokenize_fts(query)
         fts_query = """
-            SELECT m.id, m.chat_id, snippet(messages_fts, 1, '\ue000', '\ue001', '...', 16) AS snippet 
-            FROM messages_fts 
-            JOIN messages m ON messages_fts.message_id = m.id 
+            SELECT chat_id, snippet(chat_fts, 1, '\ue000', '\ue001', '...', 16) AS snippet
+            FROM chat_fts
+            WHERE content MATCH ?
+            LIMIT ?
+            OFFSET ?
+            """
+        if pagination_token is None:
+            offset = 0
+        else:
+            offset = pagination_token
+        parameters = (query.lower(), limit, offset)
+        print(fts_query)
+        print(query)
+
+        results = list(self.conn.execute(fts_query, parameters))
+        return results, (offset + len(results))
+
+
+    def search_messages_in_chat(self, query: str, chat_id: int):
+        query = self.tokenize_fts(query)
+        fts_query = """
+            SELECT m.id
+            FROM messages_fts
+            JOIN messages m ON messages_fts.message_id = m.id
+            WHERE messages_fts.content MATCH ? AND m.chat_id=?
+            ORDER BY m.id ASC
+        """
+
+        parameters = (query.lower(), chat_id)
+        return [row[0] for row in self.conn.execute(fts_query, parameters)]
+
+    def search_messages(self, query: str, pagination_token: int, limit: int):
+        query = self.tokenize_fts(query)
+        fts_query = """
+            SELECT m.id, m.chat_id, snippet(messages_fts, 1, '\ue000', '\ue001', '...', 16) AS snippet
+            FROM messages_fts
+            JOIN messages m ON messages_fts.message_id = m.id
             WHERE messages_fts.content MATCH ?
             LIMIT ?
             OFFSET ?
@@ -159,7 +234,6 @@ class ChatDB:
             offset = pagination_token
 
         parameters = (query.lower(), limit, offset)
-
         result = self.conn.execute(fts_query, parameters)
 
         message_ids = []
@@ -200,6 +274,24 @@ class ChatDB:
     def set_setting(self, name: str, value):
         encoded_value = json.dumps(value)
         query = "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
+        self.conn.execute(query, (name, encoded_value))
+        self.conn.commit()
+
+    def get_kv(self, name: str, default_value=None):
+        query = "SELECT value FROM kvs WHERE key = ?"
+        cursor = self.conn.execute(query, (name,))
+        result = cursor.fetchone()
+        if result:
+            try:
+                return json.loads(result[0])
+            except json.JSONDecodeError:
+                return default_value
+        else:
+            return default_value
+
+    def set_kv(self, name: str, value):
+        encoded_value = json.dumps(value)
+        query = "INSERT OR REPLACE INTO kvs (key, value) VALUES (?, ?)"
         self.conn.execute(query, (name, encoded_value))
         self.conn.commit()
 
