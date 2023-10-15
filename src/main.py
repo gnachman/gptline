@@ -25,9 +25,11 @@ from typing import Optional, Any, Callable
 import requests
 from html2text import html2text
 
-openai.api_key = os.environ.get("OPENAI_KEY")
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 if not openai.api_key:
-    print("Set the environment variable OPENAI_KEY to your api secret key")
+    openai.api_key = os.environ.get("OPENAI_KEY")
+if not openai.api_key:
+    print("Set the environment variable OPENAI_KEY or OPENAI_API_KEY to your api secret key")
     exit(1)
 
 @dataclass
