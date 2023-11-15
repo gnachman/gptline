@@ -734,3 +734,19 @@ def bing_search(query: str):
     values = [f' * [{v["url"]}]({v["snippet"]})' for v in search_results["webPages"]["value"]]
     return "\n".join(values)
 
+def summarize_web_page(url: str):
+    """
+    Load and summarizes a web page. Returns an English summary of the web page's contents.
+
+    Args:
+        url: The URL to fetch
+    """
+    content = do_fetch(url)
+    model = "gpt-3.5-turbo-16k"
+    if not content:
+        return "The page was empty"
+    c = Conversation(model, "I will give you the contents of a web page and you will return a one-paragraph summary.")
+    message = TextMessage.user(truncate(content, model, 14000))
+    summary = c.send(message)
+    return summary
+
