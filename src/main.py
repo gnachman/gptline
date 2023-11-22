@@ -263,9 +263,11 @@ class App:
         for task in self.tasks:
             if task.done():
                 if not task.exception:
-                    (chat_id, name) = task.result()
-                    self.chat_db.set_chat_name(chat_id, name)
-            self.tasks = [task for task in self.tasks if not task.done()]
+                    maybeTuple = task.result()
+                    if maybeTuple is not None:
+                      (chat_id, name) = maybeTuple
+                      self.chat_db.set_chat_name(chat_id, name)
+        self.tasks = [task for task in self.tasks if not task.done()]
 
     def get_chat_name(self):
         if self.current_chat_id is None:
