@@ -5,4 +5,5 @@ blessings
 pygments
 tiktoken
 html2text
+lxml_html_clean
 newspaper3k
